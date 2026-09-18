@@ -34,7 +34,7 @@ Download the associated Zenodo Dataset and place its `abm_prep/` directory at th
 
 The associated dataset DOI is:
 
-**[DATASET DOI TO BE INSERTED]**
+**[10.5281/zenodo.22833035](https://doi.org/10.5281/zenodo.22833035)**
 
 ## Calibration
 
@@ -98,7 +98,7 @@ No Google Street View imagery is redistributed.
 
 The archived software release is available at:
 
-**[SOFTWARE DOI TO BE INSERTED]**
+**[10.5281/zenodo.22833451](https://doi.org/10.5281/zenodo.22833451)**
 
 Citation metadata are provided in `CITATION.cff`.
 

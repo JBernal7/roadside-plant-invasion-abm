@@ -16,9 +16,7 @@ contact:
     orcid: "https://orcid.org/0000-0003-2800-7733"
 
 version: "1.0.0"
-doi: "10.5281/zenodo.XXXXXXX"
-date-released: "2026-XX-XX"
-
+doi: "10.5281/zenodo.22833451"
 repository-code: "https://github.com/JBernal7/roadside-plant-invasion-abm"
 license: "MIT"
 
