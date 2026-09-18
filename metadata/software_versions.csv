@@ -1,0 +1,4 @@
+software,version,role
+NetLogo,6.4.0,Model implementation
+BehaviorSearch,1.10,Genetic-algorithm calibration
+R,4.2.3,Post-processing and scenario analysis

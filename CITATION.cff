@@ -1,0 +1,34 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite this software release."
+title: "A spatially explicit agent-based model of roadside plant invasion"
+type: software
+
+authors:
+  - family-names: "Bernal-Borrego"
+    given-names: "Jessica"
+    orcid: "https://orcid.org/0000-0003-2800-7733"
+    affiliation: "Universidad de Córdoba"
+
+contact:
+  - family-names: "Bernal-Borrego"
+    given-names: "Jessica"
+    email: "jessicabernal@hub-terra.es"
+    orcid: "https://orcid.org/0000-0003-2800-7733"
+
+version: "1.0.0"
+doi: "10.5281/zenodo.XXXXXXX"
+date-released: "2026-XX-XX"
+
+repository-code: "https://github.com/JBernal7/roadside-plant-invasion-abm"
+license: "MIT"
+
+abstract: "NetLogo agent-based model and supporting calibration, management-scenario and analysis code for simulating roadside invasion dynamics of Ailanthus altissima and comparing spatial management scenarios along Mediterranean mountain roads."
+
+keywords:
+  - "Ailanthus altissima"
+  - "agent-based model"
+  - "NetLogo"
+  - "invasive alien plants"
+  - "roadside invasion"
+  - "biotic resistance"
+  - "management scenarios"

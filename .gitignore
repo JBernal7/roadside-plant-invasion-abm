@@ -1,0 +1,10 @@
+abm_prep/
+management_outputs/
+*.asc
+*.tif
+*.tiff
+.Rhistory
+.RData
+.Rproj.user/
+.DS_Store
+Thumbs.db

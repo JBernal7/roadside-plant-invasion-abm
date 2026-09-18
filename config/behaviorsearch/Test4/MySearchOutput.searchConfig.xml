@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="us-ascii"?>
+<!DOCTYPE search SYSTEM "behaviorsearch.dtd">
+<search>
+    <bsearchVersionNumber>1,10</bsearchVersionNumber>
+    <modelInfo>
+        <modelFile>C:\Netlogo\IAS_Expansion_Model_ForCalibration20260208.nlogo</modelFile>
+        <modelSetupCommands>setup</modelSetupCommands>
+        <modelStepCommands>go</modelStepCommands>
+        <modelStopCondition>ticks &gt;= 15</modelStopCondition>
+        <modelStepLimit>16</modelStepLimit>
+        <modelMetricReporter>objective_inmask_delta</modelMetricReporter>
+        <modelMeasureIf>true</modelMeasureIf>
+    </modelInfo>
+    <fitnessInfo>
+        <fitnessMinimized>true</fitnessMinimized>
+        <fitnessCollecting>AT_FINAL_STEP</fitnessCollecting>
+        <fitnessSamplingReplications>7</fitnessSamplingReplications>
+        <fitnessCombineReplications>MEDIAN</fitnessCombineReplications>
+    </fitnessInfo>
+    <searchSpace>
+        <paramSpec>["dispersal_radius_m" [100 50 800]]</paramSpec>
+        <paramSpec>["kernel_decay" [0.002 "C" 0.03]]</paramSpec>
+        <paramSpec>["maturity-age-years" [2 1 6]]</paramSpec>
+        <paramSpec>["min-sup-for-reproduction" [10 "C" 250]]</paramSpec>
+        <paramSpec>["a" [0 "C" 1]]</paramSpec>
+        <paramSpec>["b_minus_a" [0.2 "C" 1]]</paramSpec>
+        <paramSpec>["r_weight_estab" [0.1 "C" 6]]</paramSpec>
+        <paramSpec>["r_weight_growth" [0.1 "C" 6]]</paramSpec>
+        <paramSpec>["management_reset_size" [1 "C" 15]]</paramSpec>
+        <paramSpec>["gamma-recovery" [1 "C" 6]]</paramSpec>
+    </searchSpace>
+    <searchMethod type="StandardGA">
+        <searchMethodParameter name="mutation-rate" value="0.1"/>
+        <searchMethodParameter name="population-size" value="80"/>
+        <searchMethodParameter name="crossover-rate" value="0.9"/>
+        <searchMethodParameter name="population-model" value="generational"/>
+        <searchMethodParameter name="tournament-size" value="3"/>
+    </searchMethod>
+    <chromosomeRepresentation type="GrayBinaryChromosome"/>
+    <caching>true</caching>
+    <evaluationLimit>600</evaluationLimit>
+    <bestCheckingNumReplications>0</bestCheckingNumReplications>
+</search>
