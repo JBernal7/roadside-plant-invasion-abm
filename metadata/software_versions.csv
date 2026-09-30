@@ -1,4 +1,6 @@
 software,version,role
-NetLogo,6.4.0,Model implementation
+NetLogo,6.4.0,Model implementation and management-scenario simulation
 BehaviorSearch,1.10,Genetic-algorithm calibration
-R,4.2.3,Post-processing and scenario analysis
+R,4.5.2,Post-processing and management-scenario execution and analysis
+nlrx,0.4.6,Automated execution of NetLogo management scenarios from R
+Java,17.0.20.1,Java runtime used for headless NetLogo execution

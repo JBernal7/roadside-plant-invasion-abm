@@ -1,0 +1,11 @@
+"siminputrow","scenario","management_enabled","buffer_m","management_type","frequency","start_tick"
+1,"baseline","false",100,"none","once",17
+2,"low_100m","true",100,"cut","once",17
+3,"low_200m","true",200,"cut","once",17
+4,"low_400m","true",400,"cut","once",17
+5,"intermediate_100m","true",100,"cut+revegetation","annual",17
+6,"intermediate_200m","true",200,"cut+revegetation","annual",17
+7,"intermediate_400m","true",400,"cut+revegetation","annual",17
+8,"high_eradication_100m","true",100,"eradication","once",17
+9,"high_eradication_200m","true",200,"eradication","once",17
+10,"high_eradication_400m","true",400,"eradication","once",17

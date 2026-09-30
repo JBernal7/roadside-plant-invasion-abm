@@ -1,5 +1,5 @@
-legacy_or_raw_label;publication_label;meaning
-baseline/control;Baseline;No additional targeted management,  recurrent agricultural suppression only.
-low_intensity / lowintensity;Low intensity;Single cutting intervention in 2025.
-high_intensity / highintensity;Intermediate intensity;Annual cutting plus revegetation from 2025 onwards.
-eradication / erradication;High intensity (eradication);Complete removal in 2025 plus revegetation,  raw code uses the misspelling 'erradication'.
+scenario_label;model_treatment;publication_label;meaning
+baseline;none;Baseline;No additional targeted management, recurrent agricultural suppression only.
+low;cut;Low intensity;Single cutting intervention in 2025.
+intermediate;cut+revegetation;Intermediate intensity;Annual cutting plus revegetation from 2025 onwards.
+high_eradication;eradication;High intensity (eradication);Complete removal of existing stands in 2025 plus revegetation.

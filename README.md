@@ -14,17 +14,15 @@ Claudio A. Bracho-Estévanez contributed to the methodological and computational
 
 ## Repository contents
 
-1. `model/user/` — reusable NetLogo implementation based on the retained Test 4 formulation.
-2. `model/calibration/` — historical NetLogo calibration models corresponding to Tests 1–4.
-3. `model/management/` — baseline and zone-specific v22 management models for the 100-, 200-, and 400-m treatment zones.
-    - `original_v22/` preserves the historical management models unchanged.
-    - `portable_v22/` contains path-adjusted copies with relative treatment-zone paths for reproducible execution; no model-process logic was altered.
+1. `model/user/` — interactive user-facing NetLogo implementation for simulating management scenarios, defining treatment areas interactively or from predefined spatial polygons, modifying selected model and treatment settings, visualising invasion dynamics, and exporting simulation outputs.
+2. `model/calibration/` — NetLogo calibration models corresponding to Tests 1–4.
+3. `model/management/` — NetLogo implementation used for the management-scenario experiment.
 4. `config/behaviorsearch/` — BehaviorSearch configurations used for calibration.
-5. `scripts/final_analysis/` — final candidate-level calibration diagnostics and management-scenario post-processing scripts.
-6. `scripts/supporting_original/` — original working scripts retained for computational provenance.
-7. `metadata/` — scenario configuration, terminology mapping, and software-version information.
+5. `scripts_final_analysis/` — scripts used for candidate-level calibration diagnostics, management-scenario execution, spatial post-processing and final figures.
+6. `metadata/` — scenario configuration, terminology mapping and software-version information.
+7. `docs/` — additional reproducibility documentation.
 
-Large spatial inputs, calibration outputs, verification outputs, and management simulation rasters are archived separately in the associated Zenodo Dataset.
+Large spatial inputs, calibration and verification outputs, and management-scenario rasters are archived separately in the associated Zenodo Dataset.
 
 ## Data dependency
 
@@ -48,43 +46,35 @@ For the final practical-identifiability analysis, the near-optimal ensemble was 
 
 ## Management scenarios
 
-Management was evaluated across three treatment-zone widths: 100, 200, and 400 m.
+All management scenarios reported in the manuscript were generated using the same NetLogo model implementation, with scenario-specific settings supplied programmatically from R through `nlrx`. The experiment comprised one baseline scenario and nine targeted-management scenarios.
 
-The final manuscript describes the management treatments as an ordered treatment-intensity gradient:
+Targeted scenarios crossed three treatment intensities:
 
 - **Low intensity** — one cutting intervention in 2025.
 - **Intermediate intensity** — annual cutting plus revegetation from 2025 onwards.
-- **High intensity (eradication)** — complete stand removal in 2025 plus revegetation.
+- **High intensity (eradication)** — complete removal of existing stands in 2025 plus revegetation.
 
-Historical filenames and raw simulation folders retain the labels used during the original computational workflow:
+Each treatment intensity was evaluated within treatment zones of 100, 200 and 400 m.
 
-- `lowintensity` → Low intensity
-- `highintensity` → Intermediate intensity
-- `erradication` → High intensity (eradication)
+The baseline scenario included recurrent agricultural suppression but no additional targeted management.
 
-The mapping is documented in `metadata/terminology_mapping.csv` and `metadata/scenario_configuration.csv`.
+Each scenario was evaluated using 50 stochastic replicates. The same set of 50 random seeds was applied across all 10 scenarios, yielding 500 NetLogo runs. Outputs were exported for 2035 and 2045, producing 1,000 management-scenario rasters.
 
-The historical v22 experiment used one zone-specific model for each treatment-zone width:
+The exact experimental design is documented in `metadata/management_scenario_matrix.csv`, while `metadata/terminology_mapping.csv` maps scenario identifiers and NetLogo treatment settings to publication terminology.
 
-- `management1` — 100 m
-- `management2` — 200 m
-- `management3` — 400 m
+The model distributed in `model/management/IASExpansion_ManagementModel.nlogo` is the public-release version of the management model. Following the archived simulation run, development comments and the NetLogo Info tab were editorially revised for clarity and consistency with the manuscript and data-provenance documentation. The biotic-resistance input filename was also standardised to the canonical dataset filename. These changes do not alter executable model logic, parameter values, scenario settings or numerical spatial inputs.
 
-Treatment type and recurrence were changed directly in the corresponding model before each simulation batch. Separate source-code snapshots were therefore not retained for all nine treatment-intensity × treatment-zone combinations.
+For exact computational provenance, the byte-identical NetLogo file used to generate the archived management outputs is preserved in the associated Zenodo Dataset at:
 
-Each final management scenario was evaluated using **10 independent stochastic replicates**. Raw simulation outputs and the summary table underlying the management figures are archived in the associated Zenodo Dataset.
+`management/runtime_snapshot/IASExpansion_ManagementModel.nlogo`
 
-## Historical resistance-layer filename
+The MD5 checksum recorded in `management/run_metadata.txt` refers to this execution snapshot rather than to the editorially cleaned public-release file.
 
-The archived v22 management models refer to:
+Detailed execution and post-processing instructions are provided in:
 
-`abm_prep/resistance_0_1_def.asc`
+`docs/MANAGEMENT_REPRODUCIBILITY.md`
 
-This is a historical filename for the same resistance raster distributed as:
-
-`abm_prep/resistance_bio_10m.asc`
-
-Both files are retained as byte-identical copies to preserve compatibility with the original management models.
+Raw simulation rasters, random seeds, run metadata, the ASC manifest and derived management-scenario tables are archived in the associated Zenodo Dataset.
 
 ## Spatial-data provenance
 
@@ -107,3 +97,9 @@ Citation metadata are provided in `CITATION.cff`.
 The software is distributed under the **MIT License**.
 
 The associated dataset has separate licensing and attribution information in its Zenodo record.
+
+## Funding
+
+This research was carried out within the DesFutur project, funded by Fundación Biodiversidad (MITECO) under the European Union NextGenerationEU/PRTR framework, and the DYNAMO project (PID2023-152653OA-C22), funded by MCIN/AEI/10.13039/501100011033.
+
+Pablo González-Moreno was also supported by grant RYC2021-033138-I, funded by MCIN/AEI/10.13039/501100011033 and the European Union NextGenerationEU/PRTR.

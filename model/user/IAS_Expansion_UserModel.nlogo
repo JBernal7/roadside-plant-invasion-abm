@@ -91,9 +91,12 @@ end
 
 to setup
   clear-all
-  ask patches [ set occupied? false ]
-  ask patches [ set management-zone? false ]
-  ask patches [ set revegetated? false ]
+  ask patches [
+    set occupied? false
+    set management-zone? false
+    set revegetated? false
+    set inside-management? false
+  ]
   load-presence-map
   load-elevation-map
   gis:set-world-envelope-ds gis:envelope-of elevation-map  ;; define el marco para NetLogo
@@ -112,7 +115,7 @@ to setup
   draw-nucleus-names
   plot-size-distribution
 
-  ;; --- ajuste para no cargar la calibración ---
+  ;; --- parámetros de modelo calibrado (los más importantes se pasan a interfaz para que el usuario pueda probar efectos)  ---
   set gamma-recovery           1.9343862
   set maturity-age-years       4
 ;  set min-sup-for-reproduction 61.9331654
@@ -127,8 +130,9 @@ to setup
   set b_minus_a                0.5419241
 
   ;; --- presencias iniciales ---
-  mark-presence-from-polygons    ;; coloured in red patches with the IAS
   create-IAS-from-polygons       ;; centroid based
+  refresh-occupancy              ;; synchronizes occupied patches with current IAS agents
+  update-visibility
 
   ;; --- resistencia, máscara activa, idoneidad ---
   set resistancebio-map gis:load-dataset "abm_prep/resistance_bio_10m.asc"
@@ -147,12 +151,9 @@ to setup
   update-rodal-size
   set start-year 2008
 
-  ;; add the management area
-  set cut-management gis:load-dataset "abm_prep/recorte_all_poqueira.shp"
-  ask patches [
-    set inside-management? gis:intersects? cut-management self ;; property of patches, recognize if they intersect with the road buffer
-;    if inside-management? [ set pcolor gray ]   ;; only to see road buffer
-  ]
+  set-current-plot "Total stand surface over time"
+  set-current-plot-pen "total"
+  plotxy start-year (sum [sup-actual] of turtles)
 
   reset-ticks
 
@@ -216,16 +217,13 @@ to draw-nucleus-names
   ]
 end
 
+to refresh-occupancy
+  ask patches [
+    set occupied? false
+  ]
 
-to mark-presence-from-polygons
-  let feature-list gis:feature-list-of presence-map
-  foreach feature-list [ f ->
-    ask patches [
-      if gis:intersects? f self [
-        set occupied? true
-        set pcolor red  ; colorear el patch ocupado
-      ]
-    ]
+  ask patches with [ any? turtles-here ] [
+    set occupied? true
   ]
 end
 
@@ -257,21 +255,24 @@ to set-patch-metrics
 
 end
 
+to load-predefined-management-area
+  let shp user-file
+  if shp = false [ stop ]
 
+  set cut-management gis:load-dataset shp
+
+  ask patches [
+    set inside-management? gis:intersects? cut-management self
+    set management-zone? false
+  ]
+
+  update-visibility
+
+  user-message "Predefined management area loaded."
+end
 
 ; ----------------------------------------------------------------
 ; Logistic growth curve for Ailanthus stands
-; Units:
-;   - edad (input): years
-;   - output: stand surface area (m²)
-; Parameters (fixed, empirical fit from GSV/field data):
-;   K = 401.7 m² (carrying surface)
-;   θ = 4.2 (inflection point, years)
-;   β = 1.06 (steepness)
-; Reference: Kowarik & Säumel (2007); empirical fit (2008–2023 GSV data)
-; Used in:
-;   - growth-phase (annual increment)
-;   - initialization of sup-teorica
 ; ----------------------------------------------------------------
 to-report logistic-surface [edad]
   report 401.7 / (1 + exp ((4.2 - edad) / 1.06))
@@ -481,7 +482,6 @@ end
 to-report draw-kernel-offset
   let r random-float 1.0
   let idx 0
-  ;; linear scan is OK because the kernel list is small; keep it simple
   while [idx < length kernel-cumprobs and r > item idx kernel-cumprobs] [
     set idx (idx + 1)
   ]
@@ -638,13 +638,31 @@ end
 
 
 to update-visibility
+  ;; Show predefined management area when activated
+  if management-enabled? and use-predefined-management-area? [
+    ask patches with [inside-management?] [
+      set pcolor cyan
+    ]
+  ]
+
   ;; Control de visualización de parches ocupados
   ifelse show-occupied-patches? [
-    ask patches with [occupied?] [ set pcolor red ]
+    ask patches with [occupied?] [
+      set pcolor red
+    ]
   ] [
     ask patches with [occupied?] [
-      if is-number? elevation [
-        set pcolor scale-color brown elevation 200 2000
+      ifelse inside-management? and
+      management-enabled? and
+      use-predefined-management-area? and
+      ticks >= management-start-tick
+      [
+        set pcolor cyan
+      ]
+      [
+        if is-number? elevation [
+          set pcolor scale-color brown elevation 200 2000
+        ]
       ]
     ]
   ]
@@ -740,7 +758,6 @@ to apply-management
     ask patches with [management-zone? and not agri-zone?] [
       set resistance-bio min (list (resistance-bio + 0.2) 1.0)
       set revegetated? true
-      set occupied? false
     ]
   ]
 
@@ -751,9 +768,6 @@ to apply-management
     not [agri-zone?] of patch-here and
     (management-frequency != "once" or not managed?)
   ] [
-
-    ;; print to console for debugging
-    print (word "Management applied to stand " self " at tick " ticks)
 
     ;; Apply CUT only (stimulates vegetative regrowth)
     if management-type = "cut" [
@@ -776,6 +790,9 @@ to apply-management
       set sup-actual 0
       set sup-teorica 0
       set color blue
+      ask patch-here [
+        set occupied? false
+      ]
       die
     ]
 
@@ -879,13 +896,7 @@ to go
 
   update-rodal-size
   update-visibility
-  ;; plots
-  if ticks mod 1 = 0 [
-    let total-surface sum [sup-actual] of turtles
-    set-current-plot "Occupied surface over time"
-    set-current-plot-pen "total"
-    plotxy (start-year + ticks) total-surface
-  ]
+
   display
 
 
@@ -919,8 +930,13 @@ to go
     if management-frequency = "quadrennial" and ticks >= management-start-tick and ticks mod 4 = 0 [
       set should-apply-management? true
     ]
-
     if should-apply-management? [
+      if use-predefined-management-area? [
+        ask patches with [inside-management?] [
+          set management-zone? true
+        ]
+      ]
+
       apply-management
       update-rodal-size
     ]
@@ -928,18 +944,25 @@ to go
   ]
 
   reproduction-and-dispersal
+  refresh-occupancy
   update-rodal-size
   update-visibility
 
   ;; Plot surface over time
   if ticks mod 1 = 0 [  ;; cambiar a 5, 10, etc., para trazar solo cada X años
   let total-surface sum [sup-actual] of turtles
-  set-current-plot "Occupied surface over time"
+  set-current-plot "Total stand surface over time"
   set-current-plot-pen "total"
   plotxy (start-year + ticks) total-surface
  ]
 
   tick
+
+  let total-surface sum [sup-actual] of turtles
+  set-current-plot "Total stand surface over time"
+  set-current-plot-pen "total"
+  plotxy (start-year + ticks) total-surface
+
   display  ;; display all the changes made during this tick
   if ticks >= 37 [ stop ]
 
@@ -1011,14 +1034,14 @@ PLOT
 574
 912
 743
-Occupied surface over time
+Total stand surface over time
 Time (Year)
 Surface (m²)
 2008.0
-2038.0
+2045.0
 0.0
-1000000.0
-false
+100000.0
+true
 false
 "" ""
 PENS
@@ -1051,71 +1074,71 @@ SWITCH
 157
 show-occupied-patches?
 show-occupied-patches?
-1
+0
 1
 -1000
 
 MONITOR
-929
-587
-1060
-632
-Núm.total rodales
+926
+586
+1067
+631
+Total number of stands
 count turtles
 17
 1
 11
 
 MONITOR
-929
+926
 636
-1053
+1073
 681
-Tamaño medio rodal
-mean [size] of turtles * 100
+Average stand size (m²)
+mean [sup-actual] of turtles
 2
 1
 11
 
 MONITOR
-1057
+1061
 636
-1145
+1154
 681
-Tamaño máx.
-max [size] of turtles * 100
+Max. size (m²)
+max [sup-actual] of turtles
 2
 1
 11
 
 MONITOR
-1150
+1154
 636
-1215
+1234
 681
-Mediana
-median [size] of turtles * 100
+Median (m²)
+median [sup-actual] of turtles
 2
 1
 11
 
 MONITOR
-1067
+1071
 586
-1215
+1230
 631
-Nuevos rodales (año actual)
+New stands (current year)
 count turtles with [age = 0]
 17
 1
 11
 
 MONITOR
-931
+927
 688
-1214
+1230
 733
-Núm. de parches ocupados
+Number of occupied patches
 count patches with [occupied? and active?]
 17
 1
@@ -1139,7 +1162,7 @@ SWITCH
 530
 management-enabled?
 management-enabled?
-0
+1
 1
 -1000
 
@@ -1161,7 +1184,7 @@ CHOOSER
 management-type
 management-type
 "none" "cut" "cut+revegetation" "eradication"
-2
+0
 
 TEXTBOX
 27
@@ -1181,7 +1204,7 @@ CHOOSER
 management-frequency
 management-frequency
 "once" "annual" "biennial" "quadrennial"
-3
+0
 
 TEXTBOX
 26
@@ -1204,48 +1227,31 @@ Start tick (year)
 1
 
 SWITCH
-338
-628
-518
-661
+337
+662
+513
+695
 draw-zone?
 draw-zone?
-0
+1
 1
 -1000
 
-BUTTON
-339
-667
-417
-700
-Draw zone
-draw-management-zone\n
-T
-1
-T
-OBSERVER
-NIL
-NIL
-NIL
-NIL
-1
-
 TEXTBOX
-239
-638
-325
-656
+238
+672
+324
+690
 Drawing options:
 11
 0.0
 1
 
 BUTTON
-382
-705
-469
-739
+450
+704
+520
+737
 Clear zone
 clear-management-zone
 NIL
@@ -1270,10 +1276,10 @@ start-year + ticks
 11
 
 BUTTON
-424
-667
-512
-700
+346
+701
+443
+739
 Select rectangle
 select-rectangle
 NIL
@@ -1425,15 +1431,15 @@ TEXTBOX
 510
 1675
 790
-======================\n                 Quick start:\n1. Click Setup model to load data.\n2.(Optional) Toggle visual layers (stands, patches).\n3. Enable management if you want to test control actions.\n4. Choose management type, frequency, and start year.\n5. Draw treatment zones (use Draw zone or Select rectangle).\n6. Click Run simulation to start, or Run one year to advance step-by-step.\n7. Observe maps and charts; export results if needed.\n======================\n
+======================\n                 Quick start:\n1. Click Setup model to load data.\n2.(Optional) Toggle visual layers (stands, patches).\n3. Enable management if you want to test control actions.\n4. Choose management type, frequency, and start year.\n5. Define the treatment area: draw it manually or load a polygon (see also info tab for more info).\n6. Click Run simulation to start, or Run one year to advance step-by-step.\n7. Observe maps and charts; export results if needed.\n======================\n
 11
 2.0
 1
 
 TEXTBOX
-1248
+1251
 603
-1447
+1450
 621
 🟩 Stands (initial)
 11
@@ -1441,9 +1447,9 @@ TEXTBOX
 1
 
 TEXTBOX
-1248
+1251
 618
-1440
+1443
 636
 🟩 Stands (managed by farmers)
 11
@@ -1451,9 +1457,9 @@ TEXTBOX
 1
 
 TEXTBOX
-1249
+1252
 634
-1424
+1427
 653
 🟩 Stands (managed by cutting)
 11
@@ -1461,9 +1467,9 @@ TEXTBOX
 1
 
 TEXTBOX
-1249
+1252
 647
-1464
+1467
 665
 🟩 Stands (managed by cut + revegetation)
 11
@@ -1471,9 +1477,9 @@ TEXTBOX
 1
 
 TEXTBOX
-1249
+1252
 661
-1399
+1402
 679
 🟫 Occupied patches
 11
@@ -1481,9 +1487,9 @@ TEXTBOX
 1
 
 TEXTBOX
-1249
+1252
 675
-1399
+1402
 693
 ⬜ Roads
 11
@@ -1491,9 +1497,9 @@ TEXTBOX
 1
 
 TEXTBOX
-1249
+1252
 687
-1399
+1402
 705
 ⬜ Urban settings
 11
@@ -1501,9 +1507,9 @@ TEXTBOX
 1
 
 TEXTBOX
-1249
+1252
 701
-1399
+1402
 719
 🟦 Rivers
 11
@@ -1511,9 +1517,9 @@ TEXTBOX
 1
 
 TEXTBOX
-1249
+1252
 715
-1399
+1402
 733
 🟫 Management zones
 11
@@ -1521,9 +1527,9 @@ TEXTBOX
 1
 
 TEXTBOX
-1248
+1251
 580
-1398
+1401
 598
 Legend:\n
 11
@@ -1549,17 +1555,17 @@ management-start-tick
 management-start-tick
 0
 30
-6.0
+17.0
 1
 1
 NIL
 HORIZONTAL
 
 SWITCH
-339
-586
-517
-619
+336
+576
+514
+609
 use-predefined-management-area?
 use-predefined-management-area?
 1
@@ -1567,10 +1573,10 @@ use-predefined-management-area?
 -1000
 
 TEXTBOX
-238
-590
-331
-631
+235
+580
+328
+621
 Use predefined management area?
 11
 0.0
@@ -1614,7 +1620,7 @@ HORIZONTAL
 SLIDER
 24
 316
-201
+200
 349
 min-sup-for-reproduction
 min-sup-for-reproduction
@@ -1623,7 +1629,7 @@ min-sup-for-reproduction
 61.9331654
 0.01
 1
-m
+m²
 HORIZONTAL
 
 BUTTON
@@ -1643,101 +1649,433 @@ NIL
 NIL
 1
 
+TEXTBOX
+700
+767
+1029
+785
+Developed within the DesFutur project at the University of Córdoba
+11
+0.0
+1
+
+TEXTBOX
+713
+783
+1038
+801
+Funding details and acknowledgements are provided in the Info tab.
+9
+0.0
+1
+
+BUTTON
+233
+616
+395
+649
+Load management area
+load-predefined-management-area
+NIL
+1
+T
+OBSERVER
+NIL
+NIL
+NIL
+NIL
+1
+
+BUTTON
+234
+701
+338
+740
+Draw zone
+draw-management-zone\n
+T
+1
+T
+OBSERVER
+NIL
+NIL
+NIL
+NIL
+1
+
 @#$#@#$#@
 ## WHAT IS IT?
 
-This is an agent-based model (ABM) designed to simulate the expansion of *Ailanthus altissima* (tree-of-heaven), a highly invasive tree species, along Mediterranean road corridors. The model represents stands (rodales) as agents that grow clonally, reproduce, disperse propagules, and respond to different management actions such as cutting or cutting combined with revegetation.
+This is a spatially explicit agent-based model (ABM) designed to simulate the
+expansion of *Ailanthus altissima* (tree-of-heaven) along Mediterranean road
+corridors. The model represents vegetative stands rather than individual trees
+as agents. Stands grow clonally, reproduce, disperse propagules, establish new
+stands, and respond to management interventions.
 
-The purpose of the model is twofold:
+The model was developed and parameterised using observations from the
+Capileira–Los Guájares road corridor in Granada, southern Spain. Model
+parameters were calibrated against the observed cumulative expansion of
+*A. altissima* between 2008 and 2023 using field observations and historical
+street-level imagery.
 
-1. To replicate the observed dynamics of *A. altissima* from 2008 to 2023 along the Capileira–Guájares road corridor (Granada, Spain), using data from field surveys and Google Street View.
+The model has two main purposes:
 
-2. To explore alternative management scenarios, assessing how different strategies (frequency, intensity, type of treatment) may influence the invasion trajectory and support decision-making for land managers.
+1. To reproduce broad corridor-scale invasion dynamics using a process-based
+   representation of stand growth, reproduction, dispersal, environmental
+   filtering and management.
 
-By integrating empirical growth functions, dispersal kernels, and habitat suitability maps, the model provides a spatially explicit, process-based tool to understand the drivers of A. altissima spread and to test management interventions under realistic landscape conditions.
+2. To provide a reusable framework for exploring alternative management
+   interventions, including treatment type, frequency, timing and spatial
+   extent.
+
+The manuscript associated with this model evaluates three treatment-intensity
+levels:
+
+- Low intensity: a single cutting intervention.
+- Intermediate intensity: annual cutting combined with revegetation.
+- High intensity (eradication): complete removal of existing stands combined
+  with revegetation.
+
+The user interface allows these underlying treatment types and frequencies to
+be combined more flexibly than in the predefined manuscript scenarios.
 
 
 ## HOW IT WORKS
 
-The agents in the model represent vegetative stands of *Ailanthus altissima*. Each agent corresponds to a stand rather than an individual plant, which provides a realistic ecological abstraction for simulating the species’ clonal growth, dispersal, and response to management. Native vegetation is not explicitly represented as agents. Instead, resistance to invasion is encoded as patch-level indices (biotic from SIPNA/SIOSE classes and land-use filters, e.g. agricultural zones), which directly modulate the success of invasive stands in growth, reproduction, and establishment.
+### Agents
 
-The environment is implemented as a raster grid of 10 × 10 m patches, with only those cells located within a 1 km buffer of the Capileira–Guájares road corridor defined as active. Each patch is attributed with environmental and resistance values derived from GIS datasets: elevation (from a DEM), a biotic resistance index (from SIPNA/SIOSE), agricultural zones, and habitat suitability probabilities obtained from an invasive species distribution model (iSDM). Additional reference layers (roads, rivers, and urban nuclei) are included for visualization and potential future analysis. 
+Agents represent vegetative stands of *Ailanthus altissima*, rather than
+individual trees. This stand-level representation provides an operational
+abstraction for modelling clonal expansion, reproductive development,
+dispersal and management response.
 
-Initialization proceeds by loading presence polygons dated to 2008. For each polygon, the model identifies intersecting patches and sets their state variable occupied? = true. One agent is created per polygon and located at its centroid. Agents are initialized with ecological traits derived from shapefile attributes:
+Each stand stores:
 
-• Age at initialization is inferred from Height_cat as a proxy for ontogenetic stage, not as exact chronological age;
-• Initial surface (sup-inicial), taken as the observed coverage (or set to a default if missing);
-• Dynamic surface (sup-actual), updated annually via a logistic growth function;
-• Theoretical surface (sup-teorica), calculated from age using a fitted logistic curve;
-• Management history, with fields tracking previous treatments and their effects.
+- age;
+- initial stand surface (`sup-inicial`);
+- current stand surface (`sup-actual`);
+- theoretical stand surface derived from the growth curve (`sup-teorica`);
+- previous management status;
+- timing and number of management interventions; and
+- the most recent management type.
 
-Each annual tick represents one year and includes the following processes:
-
-1. Clonal growth: stand surface increases according to the logistic growth curve, adjusted by the patch-level resistance index.
-2. Management (optional): scenarios allow stand removal by cutting or cutting combined with revegetation. These treatments reduce stand surface, enforce sterile periods (differentiated by treatment type), and in the case of revegetation, increase local resistance values. Automatic control is applied in agricultural zones every year, resetting stands to a small baseline size, functionally equivalent to a cut treatment.
-3. Reproduction and dispersal: agents exceeding age and surface thresholds, and not under sterile conditions from prior management, may reproduce with probability determined by reproductive capacity (age, size, sterile periods, vigor scaling, and post-cut recovery). Propagules are dispersed through a distance-decay kernel, scaled by age class.
-4. Germination and establishment: if dispersal occurs, new agents (stands) may be created in unoccupied active patches that meet suitability (iSDM probabilities) and resistance conditions, initializing with age=0 and a baseline surface (5 m²). 
-5. Visualization and monitoring: the model dynamically updates the visual size of agents, tracks occupied surface through plots, and allows exporting management summaries.
-
-This modelling framework is designed for both retrospective validation (2008–2023, using temporal presence data from field and Google Street View) and prospective exploration of alternative management scenarios, and potentially climate or land-use change scenarios. It thus provides a spatially explicit, process-based tool to analyse the expansion dynamics of A. altissima and to support decision-making under different ecological and management conditions.
+Initial age is inferred from the observed height category and should therefore
+be interpreted as an ontogenetic proxy rather than exact chronological age.
 
 
+### Spatial environment
+
+Spatial inputs are supplied as GIS rasters and vector layers. Environmental
+rasters are generally provided at 10-m resolution, but NetLogo patches do not
+represent 10 × 10 m cells. The NetLogo world is mapped to the GIS envelope, and
+the physical dimensions of each model patch are calculated dynamically from
+the spatial extent and NetLogo world dimensions. In the current study area,
+patches are approximately 59 × 85 m.
+
+Only patches belonging to the active model domain, defined by the approximately
+1-km buffer around the study road corridor, can receive new stands.
+
+Each patch can contain:
+
+- habitat-suitability values derived from an invasive species distribution
+  model (iSDM);
+- a biotic-resistance index derived from SIPNA/REDIAM habitat information;
+- agricultural-management status;
+- management-zone status; and
+- elevation.
+
+Roads, rivers, urban nuclei and place names are included primarily as spatial
+reference and visualisation layers.
+
+Biotic resistance directly modifies stand growth and establishment probability.
+Its effect on reproduction is indirect, through its influence on stand growth
+and therefore on whether reproductive-size thresholds are reached.
+
+Agricultural areas are represented separately from biotic resistance. Stands
+located in actively managed agricultural areas are automatically reset each
+year to a small post-treatment surface, representing recurrent background
+control.
+
+
+### Initialisation
+
+The simulation starts in 2008.
+
+Observed *A. altissima* polygons assigned to 2008 are used to initialise
+the invasion. One stand agent is positioned at the centroid of each initial
+polygon. Patch occupancy is then derived from the presence of stand agents, so
+the model patch containing each initial stand centroid is marked as occupied.
+
+Initial stand attributes are obtained from the observation dataset where
+available. Initial stand surface is based on the corresponding stand-surface
+attribute, while age is estimated from height category and stand size.
+
+The theoretical stand surface for each age is calculated using the empirical
+logistic growth relationship implemented in `logistic-surface`.
+
+
+### Annual simulation cycle
+
+One tick represents one year. During each annual step, the model performs the
+following processes:
+
+1 **Clonal growth**
+
+   Stand age increases and stand surface grows according to an empirically
+   fitted logistic growth curve. Annual growth is reduced according to local
+   biotic resistance and, where applicable, post-treatment recovery.
+
+2 **Background agricultural control**
+
+   Stands occurring within actively managed agricultural patches are reset
+   annually to the post-treatment baseline size. These interventions are
+   recorded as `auto-agriculture`.
+
+3 **Optional targeted management**
+
+  Management can be applied within interactively selected treatment zones or 
+  externally supplied predefined polygons. 
+
+  Available treatment types are:
+
+   - `cut`: stand surface is reduced to the post-treatment baseline;
+   - `cut+revegetation`: stand surface is reduced and local biotic resistance
+     is increased;
+   - `eradication`: existing stands are removed and local biotic resistance is
+     increased through the revegetation effect.
+
+   Management can be applied once, annually, biennially or quadrennially from
+   a user-selected starting year.
+
+4 **Reproduction and dispersal**
+
+   Reproduction is conditional on stand age, stand surface, management-related
+   sterile periods and post-treatment recovery.
+
+   Reproductive stands generate dispersal attempts according to reproductive
+   capacity and age. Destination patches are sampled from a precomputed
+   exponential distance-decay dispersal kernel truncated at the specified
+   maximum dispersal radius.
+
+5 **Establishment**
+
+   A dispersed propagule can establish only in an unoccupied active patch.
+   Establishment probability is jointly determined by habitat suitability and
+   the patch-level biotic-resistance function.
+
+   Successful establishment generates a new stand with age 0 and an initial
+   surface of 5 m².
+
+6 **Monitoring and visualisation**
+
+   Stand size and occupied patches are updated graphically, and the interface
+   displays stand abundance, occupied patches, stand-size statistics and total
+   simulated stand surface through time.
 
 
 ## HOW TO USE IT
-1. Setup: Press setup to load GIS layers, initialize active patches (1 km road buffer), and create initial stands from the 2008 presence polygons.
-2. Go: Press go to run the simulation tick by tick (1 tick = 1 year).
-3. Management controls: Use interface switches to activate management strategies (cut, cut+revegetation) and sliders to set their frequency.
-4. Visualization: Patch colours indicate environmental attributes (e.g., resistance, agriculture zones) and agents (stands) vary in size proportional to their surface area. Plots display the number of stands and total occupied surface through time.
-5. Export: Use buttons to export summaries of stand trajectories and management events to CSV for analysis.
+
+1 **Set up the model**
+
+   Press `Setup model` to load the spatial inputs, initialise the active domain
+   and create the 2008 stands.
+
+2 **Inspect or modify key parameters**
+
+   The interface exposes selected parameters, including the minimum stand
+   surface required for reproduction and the lower-bound biotic-resistance
+   parameter.
+
+3 **Configure management**
+
+   Activate `management-enabled?` if targeted management is required.
+
+   Select:
+
+   - management type;
+   - management frequency; and
+   - management starting tick.
+
+   Tick 0 corresponds to 2008. For example, tick 17 corresponds to 2025.
+
+4 **Define a treatment zone**
+
+   Treatment areas can be defined in two ways.
+
+   **Manual selection**
+
+   Leave `use-predefined-management-area?` OFF. Treatment patches can then be
+   selected interactively using the drawing tool or the rectangle-selection
+   tool. For freehand selection, activate `draw-zone?`, start the `Draw zone`
+   button, and draw directly on the map.
+
+   **Predefined spatial polygon**
+
+   Press `Load management area` and select a polygon shapefile. Then activate
+   `use-predefined-management-area?`. The loaded polygon defines the spatial
+   area in which targeted management will operate.
+
+   When a predefined polygon is used, `draw-zone?` should remain OFF and the
+   `Draw zone` button is not required.
+
+   External management polygons must use a spatial reference compatible with
+   the model inputs and overlap the active simulation domain.
+
+5 **Run the model**
+
+   Use `Run simulation` for continuous execution or `Run one year` to advance
+   the model one annual step at a time.
+
+6 **Inspect outputs**
+
+   Use the map, monitors and occupied-surface plot to examine simulated
+   invasion dynamics.
+
+7 **Export results**
+
+   The interface can export:
+
+   - the NetLogo world state;
+   - current stand and management attributes to CSV; and
+   - binary occupancy rasters for spatial post-processing.
 
 
 ## THINGS TO NOTICE
-• Observe how stands expand clonally until they approach their logistic limit, and how local resistance slows growth.
-• Notice the effect of management: stands are reset to a small baseline size, and after cut+revegetation, local resistance values increase.
-• See how new stands establish more frequently in high-suitability patches and less in areas of high resistance.
-• Compare expansion trajectories across habitats (road verges, urban zones, riparian patches).
+
+- Stand growth is constrained by the logistic growth relationship and local
+  biotic resistance.
+- Reproductive output depends on both stand age and stand surface.
+- Establishment is more likely where habitat suitability is high and effective
+  biotic resistance is low.
+- Cutting reduces current stand size but allows subsequent recovery.
+- Cutting combined with revegetation additionally increases local resistance.
+- Eradication removes existing treated stands, but untreated or newly
+  established stands can remain elsewhere in the simulated landscape.
+- Recurrent agricultural management operates independently of the targeted
+  management scenario.
 
 
 ## THINGS TO TRY
-• Run the model without management to see natural expansion from 2008–2023, then compare with observed data.
-• Apply different management scenarios:
-   - Annual vs. quadrennial cutting.
-   - Cut vs. cut+revegetation.
-   - Restrict management to subzones (e.g., riparian-road intersections only).
+
+To reproduce the treatment-intensity structure used in the associated
+manuscript, set the management start to tick 17 (2025) and compare:
+
+- **Low intensity:** `cut` + `once`
+- **Intermediate intensity:** `cut+revegetation` + `annual`
+- **High intensity (eradication):** `eradication` + `once`
+
+These treatments can be applied to manually defined areas or to predefined spatial polygons, including the treatment-zone layers used in the associated study
+
+The interface can also be used to explore combinations outside the manuscript
+scenario design, for example:
+
+- annual versus biennial or quadrennial treatment;
+- different treatment starting years;
+- alternative manually defined treatment zones;
+- externally supplied predefined management polygons; and
+- simulations without targeted management.
 
 
-## EXTENDING THE MODEL
-• Include native vegetation dynamics explicitly (as agents or as resistance feedback).
-• Add disturbance processes (e.g., fire, drought pulses) that influence resistance. 
-• Add wind directional influence to dispersal procedures.
-• Add a mortality procedure.
-• Implement stand merging rules, where adjacent stands coalesce into larger patches.
-• Link to climate change scenarios by updating iSDM habitat suitability layers over time.
-• Incorporate economic costs of management to evaluate cost-effectiveness.
+## MODEL SCOPE AND EXTENSIONS
+
+The current model represents stand growth, reproduction, dispersal,
+environmental filtering and management. Several processes are intentionally
+simplified or held static.
+
+Potential extensions include:
+
+- dynamic native-vegetation responses;
+- disturbance processes such as fire or drought;
+- directionally explicit wind-mediated dispersal;
+- explicit stand mortality;
+- merging of adjacent stands;
+- temporally dynamic habitat-suitability layers under climate or land-use
+  change; and
+- economic costs and cost-effectiveness of management.
 
 
 ## NETLOGO FEATURES
-• The model integrates GIS extensions to load rasters and shapefiles (DEM, SIPNA, iSDM outputs).
-• Kernel dispersal is implemented through matrix operations over patches.
-• Management histories are stored as turtle-level attributes and exported via NetLogo’s file I/O functions.
+
+- NetLogo GIS extension for raster and vector spatial inputs.
+- Spatially explicit stand agents and patch-level environmental attributes.
+- Precomputed exponential distance-decay dispersal kernel using physical
+  patch dimensions derived from the GIS envelope.
+- Management zones defined interactively or from externally supplied polygon layers.
+- Stand-level management histories.
+- CSV, NetLogo-world and raster outputs for subsequent analysis.
 
 
-## RELATED MODELS
-Seed dispersal models in NetLogo tutorials (e.g., Wilensky 1999, Fire or Moths).
+## SOFTWARE, DATA AND REPRODUCIBILITY
+
+Source code and reproducibility materials:
+
+https://github.com/JBernal7/roadside-plant-invasion-abm
+
+Archived software release:
+
+https://doi.org/10.5281/zenodo.22833451
+
+Associated reproducibility dataset:
+
+https://doi.org/10.5281/zenodo.22833035
+
+The software is distributed under the MIT License.
 
 
-## CREDITS AND REFERENCES
+## CREDITS
 
-Author: Jessica Bernal Borrego - PhD Candidate - University of Córdoba (Spain)
+Software and model development:
 
-Acknowledgments: This model was developed in the framework of the DesFutur project (University of Córdoba), with support from field and remote sensing data (Google Street View, SIPNA/SIOSE, DEMs).
+Jessica Bernal-Borrego, University of Córdoba, Spain.
 
-References:
-• Kowarik, I., & Säumel, I. (2007). Biological flora of Central Europe: Ailanthus altissima. Perspectives in Plant Ecology, Evolution and Systematics.
-• Radtke, A., Ambraß, S., Zerbe, S., Tonon, G., Fontana, V., Ammer, C. (2013). Traditional coppice forest management drives the invasion of Ailanthus altissima and Robinia pseudoacacia into deciduous forests.
-• Sladonja, B., Sušek, M., Guillermic, J. (2015). Ailanthus altissima (Mill.) Swingle: a tree with a strong invasive character.
-• Additional references for GIS datasets: SIPNA/SIOSE, Google Street View, DEM (IGN Spain).
+Contributions:
+
+Claudio A. Bracho-Estévanez contributed to the methodological and computational
+implementation and execution of the management scenarios.
+
+Pablo González-Moreno contributed conceptual and methodological supervision of
+model development.
+
+
+## FUNDING
+
+This research was carried out within the DesFutur project, funded by Fundación Biodiversidad (MITECO) under the European Union NextGenerationEU/PRTR framework. Additional support during model development, scenario analysis and manuscript preparation was provided by the DYNAMO project (PID2023-152653OA-C22), funded by MCIN/AEI/10.13039/501100011033.
+
+Pablo González-Moreno was also supported by grant RYC2021-033138-I, funded by MCIN/AEI/10.13039/501100011033 and the European Union NextGenerationEU/PRTR.
+
+
+## DATA SOURCES
+
+Spatial inputs include:
+
+- SIPNA/REDIAM spatial information, Junta de Andalucía, licensed under CC BY
+  4.0;
+- Datos Espaciales de Referencia de Andalucía (DERA), Instituto de Estadística
+  y Cartografía de Andalucía, Junta de Andalucía, licensed under CC BY 4.0;
+- NASA Shuttle Radar Topography Mission (SRTM) elevation data; and
+- author-generated field and retrospective observation data.
+
+No third-party street-level imagery is redistributed; only author-derived observations and geometries are included in the associated dataset.
+
+Complete provenance and licensing information is provided in the associated
+Zenodo dataset.
+
+
+## REFERENCES
+
+Kowarik, I., & Säumel, I. (2007). Biological flora of Central Europe:
+*Ailanthus altissima*. Perspectives in Plant Ecology, Evolution and
+Systematics.
+
+Radtke, A., Ambraß, S., Zerbe, S., Tonon, G., Fontana, V., & Ammer, C.
+(2013). Traditional coppice forest management drives the invasion of
+*Ailanthus altissima* and *Robinia pseudoacacia* into deciduous forests.
+
+Sladonja, B., Sušek, M., & Guillermic, J. (2015). *Ailanthus altissima*
+(Mill.) Swingle: a tree with a strong invasive character.
+
+For the complete methodological description and bibliography, see the
+associated manuscript and archived repository.
 @#$#@#$#@
 default
 true

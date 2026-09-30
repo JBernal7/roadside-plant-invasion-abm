@@ -107,9 +107,6 @@ to setup
   initialize-elevation           ;; charges the elevation map in the visual interface
   color-by-elevation             ;; colour range for the elevation map visualized
 
-  ;; --- máscara y observación para calibración ---
-  set obs_cells_by_year_10m [75 75 76 76 78 78 80 80 80 80 80 80 80 80 80 87]
-
   ;; --- capas auxiliares / dibujo ---
   set agri-layer gis:load-dataset "abm_prep/agriculture_control.asc"
   initialize-agriculture-zones
@@ -123,11 +120,11 @@ to setup
   ;; --- presencias iniciales ---
   mark-presence-from-polygons    ;; coloured in red patches with the IAS
   create-IAS-from-polygons       ;; centroid based
-;  plot-size-distribution         ;; histogram of the distribution of the IAS'size (based on surface)
+  refresh-occupancy              ;; synchronizes occupied patches with current IAS agents
 
 
   ;; --- resistencia, máscara activa, idoneidad ---
-  set resistancebio-map gis:load-dataset "abm_prep/resistance_0_1_def.asc"
+  set resistancebio-map gis:load-dataset "abm_prep/resistance_bio_10m.asc"
   initialize-resistance-bio
   set active-mask gis:load-dataset "abm_prep/area_activa_binaria.asc"
   initialize-active-mask
@@ -141,37 +138,36 @@ to setup
   update-rodal-size
   set start-year 2008
 
-  ;; add the management area
-  set cut-management gis:load-dataset "C:/Users/claud/Downloads/UCO_contrato/Proyecto/02_ABM_Capitulo2/02_ABM_Capitulo2/abm_prep/recorte_200m.shp"
+
+  ;; --- management area selected by scenario ---
+
   ask patches [
-    set inside-management? gis:intersects? cut-management self ;; property of patches, recognize if they intersect with the road buffer
-    if inside-management? [ set pcolor gray ]   ;; only to see road buffer
+    set inside-management? false
   ]
 
-  ;; Go with management:
-  set management-enabled? true
-  set management-type "cut+revegetation"
-  set management-frequency "annual"
-  set management-start-tick 17 ;; Start management by year 2025
+  if management-enabled? [
+
+    if management-buffer-m = 100 [
+      set cut-management gis:load-dataset "abm_prep/recorte_100m.shp"
+    ]
+
+    if management-buffer-m = 200 [
+      set cut-management gis:load-dataset "abm_prep/recorte_200m.shp"
+    ]
+
+    if management-buffer-m = 400 [
+      set cut-management gis:load-dataset "abm_prep/recorte_400m.shp"
+    ]
+
+    ask patches [
+      set inside-management? gis:intersects? cut-management self
+      if inside-management? [
+        set pcolor gray
+      ]
+    ]
+  ]
 
   reset-ticks
-
-end
-
-;; Update
-to update-occupied-patches
-
-  ;; DISPERSAL IS MANDATORY
-  ;;
-  ;; Each turtle occupies only its current patch (alternative scenario to limit population expansion, and thus, according to cell resistance when establishing)
-  ;; the logics behind this is that population expansion is possible through dispersal and establishment. Thus, a given agent cannot colonize new patches
-  ;; without dispersing (dispersal - expansion are mandatory)
-  ask turtles [
-    ask patch-here [
-      set occupied? true
-      set pcolor green
-      ]
-  ]
 
 end
 
@@ -257,13 +253,28 @@ end
 
 to mark-presence-from-polygons
   let feature-list gis:feature-list-of presence-map
+
   foreach feature-list [ f ->
-    ask patches [
-      if gis:intersects? f self [
-        set occupied? true
-        set pcolor red  ; colorear el patch ocupado
+    let yr gis:property-value f "Year"
+
+    if yr = 2008 [
+      ask patches [
+        if gis:intersects? f self [
+          set occupied? true
+          set pcolor red
+        ]
       ]
     ]
+  ]
+end
+
+to refresh-occupancy
+  ask patches [
+    set occupied? false
+  ]
+
+  ask patches with [ any? turtles-here ] [
+    set occupied? true
   ]
 end
 
@@ -291,25 +302,11 @@ to set-patch-metrics
   set patch-area-m2 (patch-w-m * patch-h-m)
 
 
-;show (word "Patch size (m): " precision patch-w-m 2 " x " precision patch-h-m 2
-;           " ; area(m2)=" precision patch-area-m2 1)
-
 end
 
 
 ; ----------------------------------------------------------------
 ; Logistic growth curve for Ailanthus stands
-; Units:
-;   - edad (input): years
-;   - output: stand surface area (m²)
-; Parameters (fixed, empirical fit from GSV/field data):
-;   K = 401.7 m² (carrying surface)
-;   θ = 4.2 (inflection point, years)
-;   β = 1.06 (steepness)
-; Reference: Kowarik & Säumel (2007); empirical fit (2008–2023 GSV data)
-; Used in:
-;   - growth-phase (annual increment)
-;   - initialization of sup-teorica
 ; ----------------------------------------------------------------
 to-report logistic-surface [edad]
   report 401.7 / (1 + exp ((4.2 - edad) / 1.06))
@@ -533,18 +530,6 @@ end
 
 ; ----------------------------------------------------------------
 ; Annual clonal growth of Ailanthus stands
-; Process:
-;   - Increment stand age (+1 year)
-;   - Compute logistic theoretical surface (m²) for age
-;   - Calculate increment ΔS = (S_teo_age - S_teo_prev)
-;   - Apply local resistance factor (1 - resistance-bio)
-;   - Apply post-cut recovery ramp g(t)
-; Units:
-;   - age: years
-;   - sup-actual: m²
-;   - resistance-bio: 0..1 (dimensionless index from SIPNA-derived raster)
-; Data layers used:
-;   - resistance-bio (10 m, SIPNA)
 ; ----------------------------------------------------------------
 
 to growth-phase
@@ -560,13 +545,6 @@ to growth-phase
       let r-bio [resistance-bio] of patch-here
       if not is-number? r-bio [ set r-bio 0 ]  ;; seguridad
 
-;      ;; post-cut ramp factor g(t)
-;      let tsince (ifelse-value (last-managed-tick >= 0) [ticks - last-managed-tick] [1e9])
-;      let cutlike? member? last-management-type ["cut" "cut+revegetation" "auto-agriculture"]
-;      let g (ifelse-value (cutlike? and tsince < 1e8)
-;                [ min (list 1 (tsince / gamma-recovery)) ]
-;                [ 1 ])
-
       ;; post-cut ramp factor g(t)  (safe against gamma-recovery <= 0)
       let tsince (ifelse-value (last-managed-tick >= 0) [ticks - last-managed-tick] [1e9])
       let cutlike? member? last-management-type ["cut" "cut+revegetation" "auto-agriculture"]
@@ -575,7 +553,6 @@ to growth-phase
       let g (ifelse-value (cutlike? and tsince < 1e8)
                 [ min (list 1 (tsince / gamma-safe)) ]
                 [ 1 ])
-
 
       ;let incremento-ajustado incremento * (1 - r-bio) * g
       let b min list 1 (a + b_minus_a)
@@ -590,7 +567,6 @@ to growth-phase
   ]
 end
 
-
 to reproduction-and-dispersal
   ask turtles [
     if reproductive-capacity > 0 [
@@ -599,44 +575,8 @@ to reproduction-and-dispersal
   ]
 end
 
-
-;; Dispersal
 ; ----------------------------------------------------------------
 ; Dispersal and establishment of Ailanthus offspring
-; Purpose:
-;   - Models the dispersal of propagules (samara seeds) from
-;     parent stands and their potential establishment in nearby patches.
-;
-; Process (per stand, per tick):
-;   1. Compute dispersal factor based on stand age
-;      (dispersal-factor-by-age: ≤2y = 0.2, ≤5y = 0.6, ≤15y = 1.0, >15y = 0.5).
-;   2. Loop over kernel-matrix (normalized exponential kernel):
-;        - For each offset patch (i,j), probability = kernel value × dispersal factor.
-;        - Candidate patches collected if random draw < probability.
-;   3. Choose 1 patch at random from candidate set (n-of 1).
-;   4. Establishment test: success if patch is unoccupied AND
-;        random < habitat-suitability × (1 - resistance-bio).
-;   5. If successful, create new turtle (stand) with:
-;        - age = 0
-;        - sup-inicial = sup-actual = 5 m² (default seedling size)
-;        - sup-teorica = logistic-surface 0
-;        - pcolor marked as red+1
-;   6. Patch marked as occupied? = true.
-;
-; Units and parameters:
-;   - age (years, tick-based)
-;   - dispersal-factor (0..1, dimensionless multiplier)
-;   - kernel-matrix: dimension ( (2*radius/res)+1 ), radius=250 m, res=10 m,
-;     decay=0.04, a=2.08 (default, could be calibrated)
-;   - habitat-suitability: [0..1], from iSDM raster (10 m resolution)
-;   - resistance-bio: [0..1], from SIPNA-derived raster (10 m resolution)
-;   - Initial offspring surface: 5 m² (fixed, calibratable)
-;
-; Data sources:
-;   - Dispersal kernel parameters: Landenberger et al. (2007)
-;     + calibration with GSV data.
-;   - Habitat suitability: iSDM probabilities (ABM10m raster).
-;   - Resistance: SIPNA-derived classes at 10 m.
 ; ----------------------------------------------------------------
 
 to-report dispersal-factor-by-age [edad]
@@ -645,7 +585,6 @@ to-report dispersal-factor-by-age [edad]
   if edad <= 15 [report 1.0]
   report 0.5
 end
-
 
 to disperse-offspring
   ;; age-based multiplier
@@ -693,33 +632,8 @@ to disperse-offspring
   ]
 end
 
-
-
 ; ----------------------------------------------------------------
 ; Reproductive capacity of Ailanthus stands
-; Purpose:
-;   - Returns a multiplier [0..1] that represents the current
-;     ability of a stand to produce propagules.
-; Process (per stand, per tick):
-;   1. Check sterile windows after management (cut, cut+reveg, auto-agriculture).
-;   2. Apply maturity gate: reproduction allowed only if age ≥ maturity-age-years.
-;   3. Apply structural gate: reproduction allowed only if sup-actual ≥ min-sup-for-reproduction.
-;   4. Scale by vigor = sup-actual / sup-teorica (capped at 1).
-;   5. Apply post-cut growth ramp g(t) = min(1, tsince / gamma-recovery)
-;      to smooth recovery after management.
-;
-; Units and parameters:
-;   - age (years, tick-based)
-;   - sup-actual (m², dynamic stand surface)
-;   - sup-teorica (m², logistic theoretical surface)
-;   - maturity-age-years (int, years to reproductive maturity; default 3)
-;   - min-sup-for-reproduction (m², default 6)
-;   - sterile-years-cut (int, years with zero reproduction after cut; default 1)
-;   - sterile-years-reveg (int, years with zero reproduction after cut+reveg; default 3)
-;   - gamma-recovery (int, years to recover full vigor after management; e.g., 3)
-; Data sources:
-;   - Management parameters from experimental control strategies and calibration.
-;   - Stand surfaces from GSV-derived polygons and field validation.
 ; ----------------------------------------------------------------
 
 to-report reproductive-capacity
@@ -793,7 +707,6 @@ to draw-management-zone
   ]
 end
 
-
 to select-rectangle
   user-message "Click first corner of the rectangle"
   while [not mouse-down?] [ ]
@@ -834,45 +747,6 @@ end
 
 ; ----------------------------------------------------------------
 ; Management submodel: apply-management
-; Purpose:
-;   - Implements user-scheduled management interventions on stands,
-;     differentiating between "cut" and "cut+revegetation".
-;   - Updates stand state variables and patch attributes accordingly.
-;
-; Process (per selected patch / management zone):
-;   1. Identify turtles (stands) on the target patch.
-;   2. Reset sup-actual (surface) to small baseline (5 m²).
-;   3. Update management memory:
-;        - last-managed-tick = current ticks
-;        - last-management-type = "cut" or "cut+revegetation"
-;        - management-count += 1
-;   4. If "cut+revegetation":
-;        - Increase patch resistance-bio by +0.2 (capped at 1.0).
-;        - Set patch flag revegetated? = true.
-;   5. Visual update: recolor patches / turtles to indicate treatment.
-;
-; Units and parameters:
-;   - sup-actual: m² (reset to 5 m² after treatment)
-;   - sterile-years-cut: years of zero reproduction after cut
-;   - sterile-years-reveg: years of zero reproduction after cut+reveg
-;   - resistance-bio increment: +0.2 (dimensionless, capped at 1.0)
-;   - age (years): NOT reset, stands retain their age (ecologically realistic)
-;   - last-managed-tick: tick index when treatment occurred
-;   - management-count: integer (how many times a stand has been treated)
-;   - last-management-type: categorical (none | cut | cut+revegetation | auto-agriculture)
-;
-; Data sources:
-;   - Management regimes defined by user or experimental setup.
-;   - Resistance increment after revegetation inspired by restoration practices
-;     where native planting increases community resistance to invasion.
-;
-; Notes:
-;   - Age is not reset: this avoids unrealistic "juvenilization" after cutting.
-;   - Interaction with other submodels:
-;        * growth-phase → continues from current age but with reduced sup-actual
-;        * reproductive-capacity → silenced during sterile window + ramp recovery
-;   - Auto-agriculture is not here; it is applied automatically in agri-zone patches
-;     within `go`, but follows the same logic (reset to 5 m² + management memory).
 ; ----------------------------------------------------------------
 
 to apply-management
@@ -884,12 +758,11 @@ to apply-management
     ]
   ]
 
-  ; If erradication is implemented, eliminate A. altissima and apply revegetation
-  if management-type = "erradication" [
+  ;; If eradication is implemented, eliminate A. altissima and apply revegetation
+  if management-type = "eradication" [
     ask patches with [management-zone? and not agri-zone?] [
       set resistance-bio min (list (resistance-bio + 0.2) 1.0)
       set revegetated? true
-      set occupied? false
     ]
   ]
 
@@ -900,9 +773,6 @@ to apply-management
     not [agri-zone?] of patch-here and
     (management-frequency != "once" or not managed?)
   ] [
-
-    ;; print to console for debugging
-    print (word "Management applied to stand " self " at tick " ticks)
 
     ;; Apply CUT only (stimulates vegetative regrowth)
     if management-type = "cut" [
@@ -920,11 +790,15 @@ to apply-management
       set color blue
     ]
 
-    if management-type = "erradication" [
+    ;; Apply ERADICATION (Target plant is completely eradicated under this treatment)
+    if management-type = "eradication" [
       set sup-actual 0
       set sup-teorica 0
       set color blue
-      die ;; Important! Target plant is completely erradicated under this treatment
+      ask patch-here [
+        set occupied? false
+      ]
+      die
     ]
 
     ;; Track management history
@@ -968,7 +842,69 @@ to export-management-tables
   file-close
 end
 
+;; Export a raster with the occupied patches within the road buffer
+to export-asc
+  let xmin min [pxcor] of patches
+  let xmax max [pxcor] of patches
+  let ymin min [pycor] of patches
+  let ymax max [pycor] of patches
 
+  let ncols 2423
+  let nrows 1372
+  let cellsize 10
+  let xllcorner 444408.274179058382
+  let yllcorner 4077082.299595065415
+
+;  file-open (word "output_binary" behaviorspace-run-number "_tick" ticks ".asc")
+  let exp-name behaviorspace-experiment-name
+  if exp-name = "" [
+    set exp-name "manual"
+  ]
+
+  let run-id nlrx-run-id
+
+  if run-id = "" [
+    set run-id "manual"
+  ]
+
+  file-open (word run-id "_tick" ticks ".asc")
+
+  file-print (word "ncols " ncols)
+  file-print (word "nrows " nrows)
+  file-print (word "xllcorner " xllcorner)
+  file-print (word "yllcorner " yllcorner)
+  file-print (word "cellsize " cellsize)
+  file-print "NODATA_value -9999"
+
+  let row 0
+  while [row < nrows] [
+    let y yllcorner + (nrows - 1 - row) * cellsize
+    let line ""
+    let col 0
+
+    while [col < ncols] [
+      let x xllcorner + col * cellsize
+      let px round ( xmin + (x - xllcorner) / cellsize * (xmax - xmin) / (ncols - 1) )
+      let py round ( ymin + (y - yllcorner) / cellsize * (ymax - ymin) / (nrows - 1) )
+      let p patch px py
+
+      let val 0
+      if p != nobody [
+        if [occupied?] of p [
+          set val 1
+        ]
+      ]
+      set line (word line val " ")
+      set col col + 1
+    ]
+
+    file-print line
+    set row row + 1
+  ]
+
+  file-close
+;  user-message "Binary raster exported: output_binary.asc"
+end
 
 ; -----------------------------------------------------------------
 ; ------------------------ TO GO ----------------------------------
@@ -1029,11 +965,9 @@ to go
   ]
 
   reproduction-and-dispersal
+  refresh-occupancy
   update-rodal-size
   update-visibility
-
-  ;; Update
-  update-occupied-patches
 
   ;; Plot surface over time
   if ticks mod 1 = 0 [  ;; cambiar a 5, 10, etc., para trazar solo cada X años
@@ -1043,71 +977,13 @@ to go
   plotxy (start-year + ticks) total-surface
  ]
 
-
-
-
   tick
-
-  ;; Update
   if ticks = 27 or ticks = 37 [
     export-asc] ;; Export at years 2035 and 2045
 
   display  ;; display all the changes made during this tick
   if ticks >= 37 [ stop ]
 
-end
-
-
-;; Update
-;; Export a raster with the occupied patches within the road buffer
-to export-asc
-  let xmin min [pxcor] of patches
-  let xmax max [pxcor] of patches
-  let ymin min [pycor] of patches
-  let ymax max [pycor] of patches
-
-  let ncols 2423
-  let nrows 1372
-  let cellsize 10
-  let xllcorner 444408.274179058382
-  let yllcorner 4077082.299595065415
-
-  file-open (word "output_binary" behaviorspace-run-number "_tick" ticks ".asc")
-  file-print (word "ncols " ncols)
-  file-print (word "nrows " nrows)
-  file-print (word "xllcorner " xllcorner)
-  file-print (word "yllcorner " yllcorner)
-  file-print (word "cellsize " cellsize)
-  file-print "NODATA_value -9999"
-
-  let row 0
-  while [row < nrows] [
-    let y yllcorner + (nrows - 1 - row) * cellsize
-    let line ""
-    let col 0
-
-    while [col < ncols] [
-      let x xllcorner + col * cellsize
-      let px round ( xmin + (x - xllcorner) / cellsize * (xmax - xmin) / (ncols - 1) )
-      let py round ( ymin + (y - yllcorner) / cellsize * (ymax - ymin) / (nrows - 1) )
-      let p patch px py
-
-      let val 0
-      if p != nobody [
-        if [occupied?] of p [
-          set val 1
-        ]
-      ]
-      set line (word line val " ")
-      set col col + 1
-    ]
-
-    file-print line
-    set row row + 1
-  ]
-
-  file-close
-  user-message "Binary raster exported: output_binary.asc"
 end
 @#$#@#$#@
 GRAPHICS-WINDOW
@@ -1325,8 +1201,8 @@ CHOOSER
 443
 management-type
 management-type
-"none" "cut" "cut+revegetation" "erradication"
-2
+"none" "cut" "cut+revegetation" "eradication"
+1
 
 TEXTBOX
 24
@@ -1369,21 +1245,21 @@ Start tick (year)
 1
 
 SWITCH
-22
-622
-199
-655
+24
+627
+201
+660
 draw-zone?
 draw-zone?
-0
+1
 1
 -1000
 
 BUTTON
-22
-663
-100
-696
+24
+668
+102
+701
 Draw zone
 draw-management-zone\n
 T
@@ -1397,20 +1273,20 @@ NIL
 1
 
 TEXTBOX
-23
-603
-173
-621
+25
+608
+175
+626
 Drawing options
 11
 0.0
 1
 
 BUTTON
-62
-706
-149
-740
+64
+711
+151
+745
 Clear zone
 clear-management-zone
 NIL
@@ -1435,10 +1311,10 @@ start-year + ticks
 11
 
 BUTTON
-107
-663
-195
-696
+109
+668
+197
+701
 Select rectangle
 select-rectangle
 NIL
@@ -1714,107 +1590,37 @@ management-start-tick
 management-start-tick
 0
 30
-1.0
+16.0
 1
 1
 NIL
 HORIZONTAL
 
+CHOOSER
+28
+759
+177
+804
+management-buffer-m
+management-buffer-m
+100 200 400
+0
+
+INPUTBOX
+202
+748
+439
+808
+nlrx-run-id
+manual
+1
+0
+String
+
 @#$#@#$#@
 ## WHAT IS IT?
 
-This is an agent-based model (ABM) designed to simulate the expansion of *Ailanthus altissima* (tree-of-heaven), a highly invasive tree species, along Mediterranean road corridors. The model represents stands (rodales) as agents that grow clonally, reproduce, disperse propagules, and respond to different management actions such as cutting or cutting combined with revegetation.
-
-The purpose of the model is twofold:
-
-1. To replicate the observed dynamics of *A. altissima* from 2008 to 2023 along the Capileira–Guájares road corridor (Granada, Spain), using data from field surveys and Google Street View.
-
-2. To explore alternative management scenarios, assessing how different strategies (frequency, intensity, type of treatment) may influence the invasion trajectory and support decision-making for land managers.
-
-By integrating empirical growth functions, dispersal kernels, and habitat suitability maps, the model provides a spatially explicit, process-based tool to understand the drivers of A. altissima spread and to test management interventions under realistic landscape conditions.
-
-
-## HOW IT WORKS
-
-The agents in the model represent vegetative stands of *Ailanthus altissima*. Each agent corresponds to a stand rather than an individual plant, which provides a realistic ecological abstraction for simulating the species’ clonal growth, dispersal, and response to management. Native vegetation is not explicitly represented as agents. Instead, resistance to invasion is encoded as patch-level indices (biotic from SIPNA/SIOSE classes and land-use filters, e.g. agricultural zones), which directly modulate the success of invasive stands in growth, reproduction, and establishment.
-
-The environment is implemented as a raster grid of 10 × 10 m patches, with only those cells located within a 1 km buffer of the Capileira–Guájares road corridor defined as active. Each patch is attributed with environmental and resistance values derived from GIS datasets: elevation (from a DEM), a biotic resistance index (from SIPNA/SIOSE), agricultural zones, and habitat suitability probabilities obtained from an invasive species distribution model (iSDM). Additional reference layers (roads, rivers, and urban nuclei) are included for visualization and potential future analysis. 
-
-Initialization proceeds by loading presence polygons dated to 2008. For each polygon, the model identifies intersecting patches and sets their state variable occupied? = true. One agent is created per polygon and located at its centroid. Agents are initialized with ecological traits derived from shapefile attributes:
-
-• Age at initialization is inferred from Height_cat as a proxy for ontogenetic stage, not as exact chronological age;
-• Initial surface (sup-inicial), taken as the observed coverage (or set to a default if missing);
-• Dynamic surface (sup-actual), updated annually via a logistic growth function;
-• Theoretical surface (sup-teorica), calculated from age using a fitted logistic curve;
-• Management history, with fields tracking previous treatments and their effects.
-
-Each annual tick represents one year and includes the following processes:
-
-1. Clonal growth: stand surface increases according to the logistic growth curve, adjusted by the patch-level resistance index.
-2. Management (optional): scenarios allow stand removal by cutting or cutting combined with revegetation. These treatments reduce stand surface, enforce sterile periods (differentiated by treatment type), and in the case of revegetation, increase local resistance values. Automatic control is applied in agricultural zones every year, resetting stands to a small baseline size, functionally equivalent to a cut treatment.
-3. Reproduction and dispersal: agents exceeding age and surface thresholds, and not under sterile conditions from prior management, may reproduce with probability determined by reproductive capacity (age, size, sterile periods, vigor scaling, and post-cut recovery). Propagules are dispersed through a distance-decay kernel, scaled by age class.
-4. Germination and establishment: if dispersal occurs, new agents (stands) may be created in unoccupied active patches that meet suitability (iSDM probabilities) and resistance conditions, initializing with age=0 and a baseline surface (5 m²). 
-5. Visualization and monitoring: the model dynamically updates the visual size of agents, tracks occupied surface through plots, and allows exporting management summaries.
-
-This modelling framework is designed for both retrospective validation (2008–2023, using temporal presence data from field and Google Street View) and prospective exploration of alternative management scenarios, and potentially climate or land-use change scenarios. It thus provides a spatially explicit, process-based tool to analyse the expansion dynamics of A. altissima and to support decision-making under different ecological and management conditions.
-
-
-
-
-## HOW TO USE IT
-1. Setup: Press setup to load GIS layers, initialize active patches (1 km road buffer), and create initial stands from the 2008 presence polygons.
-2. Go: Press go to run the simulation tick by tick (1 tick = 1 year).
-3. Management controls: Use interface switches to activate management strategies (cut, cut+revegetation) and sliders to set their frequency.
-4. Visualization: Patch colours indicate environmental attributes (e.g., resistance, agriculture zones) and agents (stands) vary in size proportional to their surface area. Plots display the number of stands and total occupied surface through time.
-5. Export: Use buttons to export summaries of stand trajectories and management events to CSV for analysis.
-
-
-## THINGS TO NOTICE
-• Observe how stands expand clonally until they approach their logistic limit, and how local resistance slows growth.
-• Notice the effect of management: stands are reset to a small baseline size, and after cut+revegetation, local resistance values increase.
-• See how new stands establish more frequently in high-suitability patches and less in areas of high resistance.
-• Compare expansion trajectories across habitats (road verges, urban zones, riparian patches).
-
-
-## THINGS TO TRY
-• Run the model without management to see natural expansion from 2008–2023, then compare with observed data.
-• Apply different management scenarios:
-   - Annual vs. quadrennial cutting.
-   - Cut vs. cut+revegetation.
-   - Restrict management to subzones (e.g., riparian-road intersections only).
-
-
-## EXTENDING THE MODEL
-• Include native vegetation dynamics explicitly (as agents or as resistance feedback).
-• Add disturbance processes (e.g., fire, drought pulses) that influence resistance. 
-• Add wind directional influence to dispersal procedures.
-• Add a mortality procedure.
-• Implement stand merging rules, where adjacent stands coalesce into larger patches.
-• Link to climate change scenarios by updating iSDM habitat suitability layers over time.
-• Incorporate economic costs of management to evaluate cost-effectiveness.
-
-
-## NETLOGO FEATURES
-• The model integrates GIS extensions to load rasters and shapefiles (DEM, SIPNA, iSDM outputs).
-• Kernel dispersal is implemented through matrix operations over patches.
-• Management histories are stored as turtle-level attributes and exported via NetLogo’s file I/O functions.
-
-
-## RELATED MODELS
-Seed dispersal models in NetLogo tutorials (e.g., Wilensky 1999, Fire or Moths).
-
-
-## CREDITS AND REFERENCES
-
-Author: Jessica Bernal Borrego - PhD Candidate - University of Córdoba (Spain)
-
-Acknowledgments: This model was developed in the framework of the DesFutur project (University of Córdoba), with support from field and remote sensing data (Google Street View, SIPNA/SIOSE, DEMs).
-
-References:
-• Kowarik, I., & Säumel, I. (2007). Biological flora of Central Europe: Ailanthus altissima. Perspectives in Plant Ecology, Evolution and Systematics.
-• Radtke, A., Ambraß, S., Zerbe, S., Tonon, G., Fontana, V., Ammer, C. (2013). Traditional coppice forest management drives the invasion of Ailanthus altissima and Robinia pseudoacacia into deciduous forests.
-• Sladonja, B., Sušek, M., Guillermic, J. (2015). Ailanthus altissima (Mill.) Swingle: a tree with a strong invasive character.
-• Additional references for GIS datasets: SIPNA/SIOSE, Google Street View, DEM (IGN Spain).
+See companion article + User Model tab for reference
 @#$#@#$#@
 default
 true
@@ -2121,10 +1927,34 @@ false
 Polygon -7500403 true true 270 75 225 30 30 225 75 270
 Polygon -7500403 true true 30 75 75 30 270 225 225 270
 @#$#@#$#@
-NetLogo 6.2.2
+NetLogo 6.4.0
 @#$#@#$#@
 @#$#@#$#@
 @#$#@#$#@
+<experiments>
+  <experiment name="baseline" repetitions="2" runMetricsEveryStep="false">
+    <setup>random-seed (10000 + behaviorspace-run-number)
+setup</setup>
+    <go>go</go>
+    <metric>count turtles</metric>
+    <metric>count patches with [occupied?]</metric>
+    <enumeratedValueSet variable="management-enabled?">
+      <value value="false"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="management-buffer-m">
+      <value value="100"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="management-type">
+      <value value="&quot;none&quot;"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="management-frequency">
+      <value value="&quot;once&quot;"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="management-start-tick">
+      <value value="17"/>
+    </enumeratedValueSet>
+  </experiment>
+</experiments>
 @#$#@#$#@
 @#$#@#$#@
 default
