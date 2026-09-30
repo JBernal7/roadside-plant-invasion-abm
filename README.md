@@ -10,7 +10,7 @@ Associated manuscript authors: Jessica Bernal-Borrego, Claudio A. Bracho-Estéva
 
 **Software creator:** Jessica Bernal-Borrego.
 
-Claudio A. Bracho-Estévanez contributed to the methodological and computational implementation of the management scenarios and their execution. Pablo González-Moreno contributed conceptual and methodological supervision of model development.
+Claudio A. Bracho-Estévanez contributed to the methodological and computational implementation of the management scenarios and their execution. María Suárez-Muñoz contributed to the early conceptual development of the ABM and discussion of the modelling approach. Pablo González-Moreno contributed conceptual and methodological supervision of model development.
 
 ## Repository contents
 
