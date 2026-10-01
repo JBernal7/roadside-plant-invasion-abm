@@ -40,7 +40,7 @@ Each calibration test comprised five independent BehaviorSearch searches. Each s
 
 Candidate fitness was defined as the median incremental normalised root-mean-square error (NRMSEΔ) across the seven stochastic replicates.
 
-Post-optimisation stochastic verification (`VerifYn`) was executed directly in NetLogo for the best-performing parameterisation from each test. Verification outputs are archived in the associated Zenodo Dataset.
+Post-optimisation stochastic verification (`verifyN`) was executed directly in NetLogo for the best-performing parameterisation from each test. Verification outputs are archived in the associated Zenodo Dataset.
 
 For the final practical-identifiability analysis, the near-optimal ensemble was defined at candidate level as the top 5% of the 800 candidate parameterisations per test (`n = 40`), ranked by candidate-level median NRMSEΔ.
 
