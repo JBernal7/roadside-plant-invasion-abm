@@ -14,13 +14,13 @@ Claudio A. Bracho-Estévanez contributed to the methodological and computational
 
 ## Repository contents
 
-1. `model/user/` — interactive user-facing NetLogo implementation for simulating management scenarios, defining treatment areas interactively or from predefined spatial polygons, modifying selected model and treatment settings, visualising invasion dynamics, and exporting simulation outputs.
-2. `model/calibration/` — NetLogo calibration models corresponding to Tests 1–4.
-3. `model/management/` — NetLogo implementation used for the management-scenario experiment.
-4. `config/behaviorsearch/` — BehaviorSearch configurations used for calibration.
-5. `scripts_final_analysis/` — scripts used for candidate-level calibration diagnostics, management-scenario execution, spatial post-processing and final figures.
-6. `metadata/` — scenario configuration, terminology mapping and software-version information.
-7. `docs/` — additional reproducibility documentation.
+1. `config/behaviorsearch/` — BehaviorSearch configurations used for calibration.
+2. `docs/` — additional reproducibility documentation.
+3. `metadata/` — scenario configuration, terminology mapping and software-version information.
+4. `model/calibration/` — NetLogo calibration models corresponding to Tests 1–4.
+5. `model/management/` — NetLogo implementation used for the management-scenario experiment.
+6. `model/user/` — interactive user-facing NetLogo implementation for simulating management scenarios, defining treatment areas interactively or from predefined spatial polygons, modifying selected model and treatment settings, visualising invasion dynamics, and exporting simulation outputs.
+7. `r_workflows/` — R scripts used for candidate-level calibration diagnostics, management-scenario execution through `nlrx`, spatial post-processing and final figures.
 
 Large spatial inputs, calibration and verification outputs, and management-scenario rasters are archived separately in the associated Zenodo Dataset.
 
